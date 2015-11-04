@@ -30,3 +30,7 @@
 
 # Debug files
 *.dSYM/
+.sass-cache
+_sass
+_site
+

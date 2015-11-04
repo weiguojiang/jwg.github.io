@@ -1,0 +1,11 @@
+# Site settings
+title: weiguojiang
+email: weiguo.jiang@qq.com
+description: > # this means to ignore newlines until "baseurl:"
+  hello, welcome!
+baseurl: "" # the subpath of your site, e.g. /blog/
+url: "http://yourdomain.com" # the base hostname & protocol for your site
+github_username: weiguojiang
+
+# Build settings
+markdown: kramdown
