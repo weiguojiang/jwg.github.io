@@ -5,11 +5,13 @@ category: blog
 description: general load balance knowledge
 ---
 
-## what is Load Balance ?
+## general introduction
+
+### what is Load Balance ?
 
 负载设备作为服务器的前端设备，负责将流量根据各种策略分发到后端各个真正的服务器上，从而使后端的服务器群得到合理有效的应用
 
-## why we need Load Balance
+### why we need Load Balance
 
 保证网络的可扩展性，服务器的易管理性和可靠性
 
@@ -19,7 +21,7 @@ description: general load balance knowledge
 
 负载均衡建立在现有网络结构之上，它提供了一种廉价又有效的方法扩展网络设备和服务器的带宽、 增加吞吐量、加强网络数据处理能力、提高网络的灵活性和可用性
 
-## how it work
+### how it work
 
 在第一个包的时候，根据策略选择后端的服务器，建立session，也就是slow path。后面的包通过session表，得到session后，直接利用上次的结果，将包发给相同的服务器，也就是fast path。
 
@@ -29,7 +31,7 @@ description: general load balance knowledge
 
 现代负载均衡技术通常操作于网络的第四层或第七层，这是针对网络应用 的负载均衡技术，它完全脱离于交换机、服务器而成为独立的技术设备。这也是我们现在要讨论的对象。
 
-## how it select
+### how it select
 
 * 依序Round Robin 　
 * 比重Weighted Round Robin
@@ -40,7 +42,7 @@ description: general load balance knowledge
 * 服务别Service
 * 自动分配Auto Mode
 
-## deployment
+### deployment
 
 负载均衡有三种部署方式：路由模式、桥接模式、服务直接返回模式。
 
@@ -56,6 +58,13 @@ description: general load balance knowledge
 
 
 ## Ananta: Cloud Scale Load Balancing
+
+contributions:  
+
+ * Identifying the requirements and design space for a cloudscale solution for layer-4 load balancing.
+ * Providing design, implementation and evaluation of Ananta that combines techniques in networking and distributed systems
+   to refactor load balancer functionality in a novel way to meet scale, performance and reliability requirements.
+ * Providing measurements and insights from running Anant in a large operational Cloud.
 
 Ananta, a scale-out layer-4 load balancer that runs on commodity hardware and
 meets the performance, reliability and operational requirements of multi-tenant cloud computing environments
@@ -85,12 +94,6 @@ The controller also implements real-time port allocation for outbound NAT, also 
 keeping per-connection state is necessary to maintain application uptime due to the dynamic nature of the cloud.
 weighted random load balancing policy, which reduces the need for per-flow state synchronization among load balancer instances.
 
-contributions:
-
- * Identifying the requirements and design space for a cloudscale solution for layer-4 load balancing.
- * Providing design, implementation and evaluation of Ananta that combines techniques in networking and distributed systems
-   to refactor load balancer functionality in a novel way to meet scale, performance and reliability requirements.
- * Providing measurements and insights from running Anant in a large operational Cloud.
 
 Background:
 
@@ -164,6 +167,7 @@ Running the BGP protocol on the Mux provides automatic failure detection and rec
 Packet Handling  
 
 a mapping table (VIP map )  
+
   * a VIP endpoint, i.e., three-tuple (VIP, IP protocol, port), to a list of DIPs
   * is computed by AM and sent to all the Muxes in a Mux Pool
 
@@ -179,6 +183,114 @@ Stateful entries are used for load balancing and stateless entries are used for 
 Every non-SYN TCP packet, and every packet for connection-less protocols, is matched against this flow table first,
 and if a match is found it is forwarded to the DIP from the flow table. This ensures that once a connection is directed to a DIP
 
+
+## Maglev: A Fast and Reliable Software Network Load Balancer
+
+contributions are:   
+1) present the design and implementation of Maglev,   
+2) share experiences of operating Maglev at a global scale,   
+3) demonstrate the capability of Maglev through extensive evaluations.
+
+<img src="/images/LB/Maglev/gen.png" alt="sdn" width="1000"></a>
+
+Maglev is Google’s network load balancer. It is a large distributed software system that runs on commodity Linux servers.
+
+Network routers distribute packets evenly to the Maglev machines via Equal Cost Multipath (ECMP);
+each Maglev machine then matches the packets to their corresponding services and spreads them evenly to the service endpoints.
+
+Maglev is optimized for packet processing performance and be also equipped with consistent hashing and connection tracking features.
+
+the design and implementation are highly complex and challenging:  
+
+ * each individual machine in the system must provide high throughput.
+ * provide connection persistence: packets belonging to the same connection should always be directed to the same service endpoint
+
+### System Overview
+
+<img src="/images/LB/Maglev/packet-flow.png" alt="sdn" width="1000"></a>
+
+Every Google service has one or more Virtual IP ad-dresses (VIPs). A VIP served by `multiple service endpoints` behind Maglev.
+Maglev associates each VIP with a set of service endpoints and announces it to the router over BGP.
+
+The setup for large clusters is more complicated to be scaling, so hardware encapsulators are deployed behind
+the router, which tunnel packets from routers to Maglev machines.
+
+#### config
+
+<img src="/images/LB/Maglev/config.png" alt="sdn" width="1000"></a>
+
+each Maglev machine contains a controller and a forwarder. it earn the VIPs to be served from configuration objects.
+the controller periodically checks the health status of the forwarder and decides whether to announce or withdraw all the VIPs via BGP.
+
+At the forwarder, each VIP is configured with one or more backend pools.
+Each backend pool is associated with one or more health checking methods by IP.
+
+### Forwarder
+
+<img src="/images/LB/Maglev/forward.png" alt="sdn" width="1000"></a>
+
+The forwarder receives packets from the NIC, rewrites them with proper GRE/IP headers and then sends them back to the NIC.
+
+After Packets received by the NIC, steering module process it, it calculates the `5-tuple hash1`  and assigns them to different `receiving queues` based on hash value(Each receiving queue is attached to a packet rewriter thread).
+
+The packet thread first tries to match each packet to a `configured VIP`. Then it recomputes the `5-tuple hash` and
+looks up the hash value in the `connection tracking table`. (The connection table stores backend selection results for recent connections)
+
+If a match is found and the selected backend is still healthy, the result is simply reused.
+Otherwise the thread consults the `consistent hashing module` and selects a new backend;
+it also adds an entry to the connection table for future packets with the same 5-tuple.
+
+The forwarder maintains one connection table per packet thread to avoid access contention.
+
+After a backend is selected, the packet thread encapsulates the packetwith proper GRE/IP headers
+and sends it to the attached transmission queue. The muxing module then polls all transmission queues and
+passes the packets to the NIC.
+
+#### Fast Packet Processing
+
+<img src="/images/LB/Maglev/fast.png" alt="sdn" width="1000"></a>
+
+Maglev bypass the kernel entirely for packet processing.
+
+When Maglev is started, it pre-allocates a packet pool that is shared between the NIC and the forwarder.
+Both the steering and muxing modules maintain a ring queue of pointers pointing to packets in the packet pool.
+
+### backend selection
+
+it need send all packets of a connection to the same backend:  
+
+  * First, we select a backend using a new form of consistent hashing which distributes traffic very evenly.
+  * Then we record the selection in a local connection tracking table.
+
+connection tracking table:  
+ uses a fixed-size hash table mapping 5-tuple hash values to backends.
+
+### Consistent Hashing
+
+how about share connection state among all Maglev machines ?  
+  it may negatively affect forwarding performance
+
+A better-performing solution is to use local consistent hashing, The idea is to generate a large lookup table with each
+backend taking a number of entries in the table  
+
+ * load balancing: each backend will receive an almost equal number of connections.
+ * minimal disruption: when the set of backends changes, a connectionwill likely be sent to the same backend as it was before.
+
+ Maglev hashing
+
+
+### Fragment Handling
+
+assumptions:
+
+* First, all fragments of the same datagram must be received by the same Maglev.
+* Second, theMaglev must make consistent backend selection decisions for unfragmented packets, first fragments, and non-first fragments.
+
+but some routers use 5-tuple hashing for first fragments and 3-tuple for non-first fragments.  
+so Each Maglev is configured with a special backend pool consisting of all Maglevs within the cluster.
+Upon receipt of a fragment, Maglev computes its 3-tuple hash using the L3 header and forwards it to a Maglev from the pool based on thehash value.  
+Since all fragments belonging to the same datagram contain the same 3-tuple, they are guaranteed to be redirected to the same Maglev. We use the GRE
+recursion control field to ensure that fragments are only redirected once
 
 
 ## Reference link
